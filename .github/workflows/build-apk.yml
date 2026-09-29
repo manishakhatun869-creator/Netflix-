@@ -10,6 +10,9 @@ on:
 jobs:
   build-apks:
     runs-on: ubuntu-latest
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
 
     steps:
       - name: Checkout repository
@@ -32,18 +35,18 @@ jobs:
           echo "Checking Android SDK..."
           echo "ANDROID_HOME=$ANDROID_HOME"
           echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-          # Ensure sdkmanager in PATH
-          export ANDROID_HOME=$ANDROID_HOME
-          export ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT
-          export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools
-          # List installed
-          sdkmanager --list_installed || true
+          ls -la $ANDROID_HOME || true
+          # Ensure ANDROID_HOME is set for future steps
+          echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> $GITHUB_PATH
+          echo "$ANDROID_HOME/platform-tools" >> $GITHUB_PATH
           # Accept licenses
           yes | sdkmanager --licenses || true
-          # Install required SDKs for Capacitor (compileSdk 36)
-          sdkmanager --install "platform-tools" "platforms;android-36" "build-tools;36.0.0" "platforms;android-34" "build-tools;34.0.0" "platforms;android-33" "build-tools;33.0.2" || true
+          # Install required SDKs
+          sdkmanager --install "platform-tools" "platforms;android-34" "build-tools;34.0.0" "platforms;android-33" "build-tools;33.0.2" || true
           echo "SDK setup done"
-          sdkmanager --list_installed || true
+          sdkmanager --list_installed | tail -20
 
       - name: Install dependencies
         run: npm ci
@@ -67,29 +70,48 @@ jobs:
           ls -lh android-user/app/src/main/assets/public/ | head -20
           echo "=== android-admin assets ==="
           ls -lh android-admin/app/src/main/assets/public/ | head -20
-          echo "=== Check admin flag ==="
-          grep -c "IS_ADMIN_APK" dist-admin/index.html || echo "not found in dist-admin"
-          grep -c "IS_ADMIN_APK" android-admin/app/src/main/assets/public/index.html || echo "not found in android-admin assets"
 
       # --- Build User APK ---
       - name: Build User APK (Debug)
         run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          ls $ANDROID_HOME/platforms/ || true
           cd android-user
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon -x test --stacktrace --info 2>&1 | tail -100
+          ./gradlew --version
+          ./gradlew assembleDebug --no-daemon -x test --stacktrace 2>&1 | tee ../user-build.log
           echo "=== User APK built ==="
-          ls -lh app/build/outputs/apk/debug/
+          ls -lh app/build/outputs/apk/debug/ || true
           cp app/build/outputs/apk/debug/app-debug.apk ../Netflix-User.apk || true
+        continue-on-error: false
+
+      - name: Upload User Build Log (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: user-build-log
+          path: user-build.log
+          retention-days: 7
 
       # --- Build Admin APK ---
       - name: Build Admin APK (Debug)
         run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
           cd android-admin
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon -x test --stacktrace --info 2>&1 | tail -100
+          ./gradlew assembleDebug --no-daemon -x test --stacktrace 2>&1 | tee ../admin-build.log
           echo "=== Admin APK built ==="
-          ls -lh app/build/outputs/apk/debug/
+          ls -lh app/build/outputs/apk/debug/ || true
           cp app/build/outputs/apk/debug/app-debug.apk ../Netflix-Admin.apk || true
+
+      - name: Upload Admin Build Log (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: admin-build-log
+          path: admin-build.log
+          retention-days: 7
 
       - name: List APKs
         run: |
@@ -144,23 +166,8 @@ jobs:
           echo "## 🎬 Netflix APKs Built Successfully!" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 📱 APK Details" >> $GITHUB_STEP_SUMMARY
-          echo "- **User App**: com.netflix.user - Netflix (Main streaming app with bottom nav, banners, search, categories, video player)" >> $GITHUB_STEP_SUMMARY
-          echo "- **Admin App**: com.netflix.admin - Netflix Admin (Controls all system - movies, banners, categories via direct video links)" >> $GITHUB_STEP_SUMMARY
+          echo "- **User App**: com.netflix.user - Netflix" >> $GITHUB_STEP_SUMMARY
+          echo "- **Admin App**: com.netflix.admin - Netflix Admin" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 📦 Artifacts" >> $GITHUB_STEP_SUMMARY
-          echo "- netflix-user-apk - User APK (install on Android)" >> $GITHUB_STEP_SUMMARY
-          echo "- netflix-admin-apk - Admin APK (install on Android)" >> $GITHUB_STEP_SUMMARY
-          echo "- netflix-both-apks - Both APKs together" >> $GITHUB_STEP_SUMMARY
-          echo "- netflix-apks-renamed - Renamed APKs (Netflix-User-v1.0.apk, Netflix-Admin-v1.0.apk)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 🔧 Features" >> $GITHUB_STEP_SUMMARY
-          echo "- Bottom Navigation, Banner Carousel, Search, Categories" >> $GITHUB_STEP_SUMMARY
-          echo "- Video Direct Links + Thumbnails support" >> $GITHUB_STEP_SUMMARY
-          echo "- Admin controls all app system" >> $GITHUB_STEP_SUMMARY
-          echo "- Built with Capacitor + React + Vite" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 📥 Download" >> $GITHUB_STEP_SUMMARY
-          echo "Go to Actions -> This workflow run -> Artifacts to download APKs" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 🔐 Admin Login" >> $GITHUB_STEP_SUMMARY
-          echo "Password: admin123 or netflix" >> $GITHUB_STEP_SUMMARY
+          echo "- netflix-user-apk, netflix-admin-apk, netflix-both-apks, netflix-apks-renamed" >> $GITHUB_STEP_SUMMARY
