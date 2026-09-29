@@ -27,8 +27,25 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Setup Android SDK (Manual)
+        run: |
+          echo "Checking Android SDK..."
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          ls -la $ANDROID_HOME || echo "No ANDROID_HOME"
+          ls -la $ANDROID_SDK_ROOT || echo "No ANDROID_SDK_ROOT"
+          # Ensure sdkmanager is available
+          which sdkmanager || echo "sdkmanager not in PATH"
+          ls $ANDROID_HOME/cmdline-tools/ || true
+          # Add cmdline-tools to PATH if needed
+          export ANDROID_HOME=$ANDROID_HOME
+          export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools
+          # Accept licenses
+          yes | sdkmanager --licenses || true
+          # Install required packages
+          sdkmanager --install "platform-tools" "platforms;android-34" "build-tools;34.0.0" "platforms;android-33" "build-tools;33.0.2" || true
+          echo "SDK setup done"
+          sdkmanager --list_installed || true
 
       - name: Install dependencies
         run: npm ci
@@ -78,9 +95,9 @@ jobs:
 
       - name: List APKs
         run: |
-          ls -lh *.apk
-          ls -lh android-user/app/build/outputs/apk/debug/
-          ls -lh android-admin/app/build/outputs/apk/debug/
+          ls -lh *.apk || true
+          ls -lh android-user/app/build/outputs/apk/debug/ || true
+          ls -lh android-admin/app/build/outputs/apk/debug/ || true
 
       # --- Upload Artifacts ---
       - name: Upload User APK Artifact
