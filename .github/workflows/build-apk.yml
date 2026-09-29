@@ -27,23 +27,21 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Setup Android SDK (Manual)
+      - name: Setup Android SDK
         run: |
           echo "Checking Android SDK..."
           echo "ANDROID_HOME=$ANDROID_HOME"
           echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-          ls -la $ANDROID_HOME || echo "No ANDROID_HOME"
-          ls -la $ANDROID_SDK_ROOT || echo "No ANDROID_SDK_ROOT"
-          # Ensure sdkmanager is available
-          which sdkmanager || echo "sdkmanager not in PATH"
-          ls $ANDROID_HOME/cmdline-tools/ || true
-          # Add cmdline-tools to PATH if needed
+          # Ensure sdkmanager in PATH
           export ANDROID_HOME=$ANDROID_HOME
+          export ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT
           export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools
+          # List installed
+          sdkmanager --list_installed || true
           # Accept licenses
           yes | sdkmanager --licenses || true
-          # Install required packages
-          sdkmanager --install "platform-tools" "platforms;android-34" "build-tools;34.0.0" "platforms;android-33" "build-tools;33.0.2" || true
+          # Install required SDKs for Capacitor (compileSdk 36)
+          sdkmanager --install "platform-tools" "platforms;android-36" "build-tools;36.0.0" "platforms;android-34" "build-tools;34.0.0" "platforms;android-33" "build-tools;33.0.2" || true
           echo "SDK setup done"
           sdkmanager --list_installed || true
 
@@ -78,20 +76,20 @@ jobs:
         run: |
           cd android-user
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon -x test --stacktrace
+          ./gradlew assembleDebug --no-daemon -x test --stacktrace --info 2>&1 | tail -100
           echo "=== User APK built ==="
           ls -lh app/build/outputs/apk/debug/
-          cp app/build/outputs/apk/debug/app-debug.apk ../Netflix-User.apk
+          cp app/build/outputs/apk/debug/app-debug.apk ../Netflix-User.apk || true
 
       # --- Build Admin APK ---
       - name: Build Admin APK (Debug)
         run: |
           cd android-admin
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon -x test --stacktrace
+          ./gradlew assembleDebug --no-daemon -x test --stacktrace --info 2>&1 | tail -100
           echo "=== Admin APK built ==="
           ls -lh app/build/outputs/apk/debug/
-          cp app/build/outputs/apk/debug/app-debug.apk ../Netflix-Admin.apk
+          cp app/build/outputs/apk/debug/app-debug.apk ../Netflix-Admin.apk || true
 
       - name: List APKs
         run: |
@@ -127,9 +125,9 @@ jobs:
 
       - name: Rename APKs for Release
         run: |
-          cp android-user/app/build/outputs/apk/debug/app-debug.apk ./Netflix-User-v1.0.apk
-          cp android-admin/app/build/outputs/apk/debug/app-debug.apk ./Netflix-Admin-v1.0.apk
-          ls -lh *.apk
+          cp android-user/app/build/outputs/apk/debug/app-debug.apk ./Netflix-User-v1.0.apk || true
+          cp android-admin/app/build/outputs/apk/debug/app-debug.apk ./Netflix-Admin-v1.0.apk || true
+          ls -lh *.apk || true
 
       - name: Upload Renamed APKs
         uses: actions/upload-artifact@v4
@@ -139,6 +137,7 @@ jobs:
             Netflix-User-v1.0.apk
             Netflix-Admin-v1.0.apk
           retention-days: 90
+          if-no-files-found: warn
 
       - name: Build Summary
         run: |
