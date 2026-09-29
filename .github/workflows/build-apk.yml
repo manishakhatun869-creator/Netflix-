@@ -54,93 +54,75 @@ jobs:
 
       - name: Build User APK
         run: |
+          set -o pipefail
           cd android-user
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon -x test --stacktrace | tee ../user-build.log
-          echo "=== FIND APK ===" | tee -a ../user-build.log
-          find . -type f -name "*.apk" | tee -a ../user-build.log
-          ls -R app/build/outputs/ | tee -a ../user-build.log || true
-          # Copy to known location
+          ./gradlew --version
+          ./gradlew assembleDebug --no-daemon -x test --stacktrace 2>&1 | tee ../user-build.log
+          echo "=== Build outputs ==="
+          ls -R app/build/outputs/ || echo "No outputs"
+          find app/build -name "*.apk" -type f -exec ls -lh {} \;
           mkdir -p ../apk-output/user/
-          find app/build -name "*.apk" -exec cp {} ../apk-output/user/ \; || true
-          ls -lh ../apk-output/user/ | tee -a ../user-build.log
+          find app/build -name "*.apk" -type f -exec cp {} ../apk-output/user/ \; || true
+          ls -lh ../apk-output/user/ || true
 
       - name: Build Admin APK
         run: |
+          set -o pipefail
           cd android-admin
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon -x test --stacktrace | tee ../admin-build.log
-          echo "=== FIND APK ===" | tee -a ../admin-build.log
-          find . -type f -name "*.apk" | tee -a ../admin-build.log
-          ls -R app/build/outputs/ | tee -a ../admin-build.log || true
+          ./gradlew assembleDebug --no-daemon -x test --stacktrace 2>&1 | tee ../admin-build.log
+          echo "=== Build outputs ==="
+          ls -R app/build/outputs/ || echo "No outputs"
+          find app/build -name "*.apk" -type f -exec ls -lh {} \;
           mkdir -p ../apk-output/admin/
-          find app/build -name "*.apk" -exec cp {} ../apk-output/admin/ \; || true
-          ls -lh ../apk-output/admin/ | tee -a ../admin-build.log
+          find app/build -name "*.apk" -type f -exec cp {} ../apk-output/admin/ \; || true
+          ls -lh ../apk-output/admin/ || true
 
-      - name: Collect All APKs
+      - name: Collect APKs
+        if: always()
         run: |
-          echo "=== Collecting APKs ==="
+          echo "=== Searching APKs ==="
+          find . -name "*.apk" -type f -exec ls -lh {} \; || echo "No APKs found"
           mkdir -p ./final-apks
-          find . -name "*.apk" -type f | while read f; do echo "Found: $f"; cp "$f" ./final-apks/ || true; done
-          ls -lh ./final-apks/ || echo "No APKs in final-apks"
-          ls -lh ./apk-output/ -R || true
-          # Copy with proper names
-          cp ./final-apks/*.apk ./ 2>/dev/null || true
-          find ./apk-output -name "*.apk" -exec cp {} ./final-apks/ \; 2>/dev/null || true
-          # Ensure we have at least 2 APKs with proper names
-          ls -lh ./final-apks/
-          # Create user and admin specific copies
-          USER_APK=$(find ./final-apks -name "*.apk" | head -1)
-          ADMIN_APK=$(find ./final-apks -name "*.apk" | tail -1)
-          if [ -n "$USER_APK" ]; then cp "$USER_APK" ./Netflix-User-v1.0.apk; echo "User APK: $USER_APK -> Netflix-User-v1.0.apk"; fi
-          if [ -n "$ADMIN_APK" ]; then cp "$ADMIN_APK" ./Netflix-Admin-v1.0.apk; echo "Admin APK: $ADMIN_APK -> Netflix-Admin-v1.0.apk"; fi
-          # If only one APK found, duplicate for both (same app but different package still need 2 builds, but fallback)
-          if [ ! -f ./Netflix-Admin-v1.0.apk ] && [ -f ./Netflix-User-v1.0.apk ]; then cp ./Netflix-User-v1.0.apk ./Netflix-Admin-v1.0.apk; fi
-          if [ ! -f ./Netflix-User-v1.0.apk ] && [ -f ./Netflix-Admin-v1.0.apk ]; then cp ./Netflix-Admin-v1.0.apk ./Netflix-User-v1.0.apk; fi
-          ls -lh *.apk || echo "No APK in root"
+          find . -path ./node_modules -prune -o -name "*.apk" -type f -print | while read f; do cp "$f" ./final-apks/ 2>/dev/null || true; done
           ls -lh ./final-apks/ || true
+          cp ./final-apks/*.apk ./ 2>/dev/null || true
+          # Create renamed versions
+          if ls ./final-apks/*.apk 1>/dev/null 2>&1; then
+            FIRST=$(ls ./final-apks/*.apk | head -1)
+            cp "$FIRST" ./Netflix-User-v1.0.apk || true
+            cp "$FIRST" ./Netflix-Admin-v1.0.apk || true
+            # If more than one, use second for admin
+            SECOND=$(ls ./final-apks/*.apk | tail -1)
+            if [ "$FIRST" != "$SECOND" ]; then cp "$SECOND" ./Netflix-Admin-v1.0.apk; fi
+          fi
+          ls -lh *.apk || echo "No APK in root"
+          echo "=== Final APKs ===" >> $GITHUB_STEP_SUMMARY
+          find . -name "*.apk" -type f | head -20 >> $GITHUB_STEP_SUMMARY || echo "No APKs" >> $GITHUB_STEP_SUMMARY
 
-      - name: Upload User APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: netflix-user-apk
-          path: |
-            Netflix-User-v1.0.apk
-            final-apks/*.apk
-            apk-output/user/*.apk
-            android-user/app/build/outputs/apk/debug/*.apk
-          if-no-files-found: warn
-          retention-days: 30
-
-      - name: Upload Admin APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: netflix-admin-apk
-          path: |
-            Netflix-Admin-v1.0.apk
-            final-apks/*.apk
-            apk-output/admin/*.apk
-            android-admin/app/build/outputs/apk/debug/*.apk
-          if-no-files-found: warn
-          retention-days: 30
-
-      - name: Upload All APKs
-        uses: actions/upload-artifact@v4
-        with:
-          name: netflix-both-apks
-          path: |
-            *.apk
-            final-apks/
-            apk-output/
-          if-no-files-found: warn
-          retention-days: 30
-
-      - name: Upload Logs
+      - name: Upload APKs (All Found)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: build-logs
+          name: netflix-apks
           path: |
+            *.apk
+            final-apks/*.apk
+            apk-output/**/*.apk
+            android-user/app/build/outputs/apk/**/*.apk
+            android-admin/app/build/outputs/apk/**/*.apk
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload Build Outputs (Debug)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-outputs
+          path: |
+            apk-output/
+            final-apks/
             user-build.log
             admin-build.log
           if-no-files-found: warn
@@ -151,13 +133,12 @@ jobs:
         run: |
           echo "## Build Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### APKs Found" >> $GITHUB_STEP_SUMMARY
           find . -name "*.apk" -type f 2>/dev/null | head -20 >> $GITHUB_STEP_SUMMARY || echo "No APKs found" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           ls -lh *.apk 2>/dev/null >> $GITHUB_STEP_SUMMARY || echo "No APK in root" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### User Build Log Tail" >> $GITHUB_STEP_SUMMARY
-          tail -50 user-build.log 2>/dev/null >> $GITHUB_STEP_SUMMARY || echo "No user log" >> $GITHUB_STEP_SUMMARY
+          echo "### User Log Tail" >> $GITHUB_STEP_SUMMARY
+          tail -100 user-build.log 2>/dev/null >> $GITHUB_STEP_SUMMARY || echo "No user log" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Admin Build Log Tail" >> $GITHUB_STEP_SUMMARY
-          tail -50 admin-build.log 2>/dev/null >> $GITHUB_STEP_SUMMARY || echo "No admin log" >> $GITHUB_STEP_SUMMARY
+          echo "### Admin Log Tail" >> $GITHUB_STEP_SUMMARY
+          tail -100 admin-build.log 2>/dev/null >> $GITHUB_STEP_SUMMARY || echo "No admin log" >> $GITHUB_STEP_SUMMARY
