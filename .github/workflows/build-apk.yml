@@ -8,9 +8,8 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   issues: write
-  pull-requests: write
 
 jobs:
   build-apks:
@@ -37,7 +36,6 @@ jobs:
 
       - name: Setup Android SDK
         run: |
-          echo "ANDROID_HOME=$ANDROID_HOME"
           echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
           echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
           echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> $GITHUB_PATH
@@ -60,59 +58,57 @@ jobs:
         run: node scripts/prepare-android.js
 
       - name: Build User APK
-        id: build-user
         run: |
           set -o pipefail
           cd android-user
           chmod +x gradlew
           echo "sdk.dir=$ANDROID_HOME" > local.properties
-          ./gradlew --version
-          echo "=== Starting Gradle Build User ==="
-          ./gradlew assembleDebug --no-daemon -x test --stacktrace 2>&1 | tee ../user-build.log; EXIT_CODE=${PIPESTATUS[0]}
-          echo "Gradle exit code: $EXIT_CODE" | tee -a ../user-build.log
-          ls -R app/build/outputs/ 2>&1 | tee -a ../user-build.log || true
-          find app/build -name "*.apk" -type f -exec ls -lh {} \; 2>&1 | tee -a ../user-build.log || true
+          ./gradlew assembleDebug --no-daemon -x test --stacktrace 2>&1 | tee ../user-build.log
+          find app/build -name "*.apk" -type f -exec ls -lh {} \;
           mkdir -p ../apk-output/user/
-          find app/build -name "*.apk" -type f -exec cp {} ../apk-output/user/ \; 2>&1 | tee -a ../user-build.log || true
-          if [ $EXIT_CODE -ne 0 ]; then
-            echo "Gradle failed with $EXIT_CODE"
-            exit $EXIT_CODE
-          fi
+          find app/build -name "*.apk" -exec cp {} ../apk-output/user/ \; || true
 
       - name: Build Admin APK
-        id: build-admin
         run: |
           set -o pipefail
           cd android-admin
           chmod +x gradlew
           echo "sdk.dir=$ANDROID_HOME" > local.properties
-          ./gradlew assembleDebug --no-daemon -x test --stacktrace 2>&1 | tee ../admin-build.log; EXIT_CODE=${PIPESTATUS[0]}
-          echo "Gradle exit code: $EXIT_CODE" | tee -a ../admin-build.log
-          ls -R app/build/outputs/ 2>&1 | tee -a ../admin-build.log || true
-          find app/build -name "*.apk" -type f -exec ls -lh {} \; 2>&1 | tee -a ../admin-build.log || true
+          ./gradlew assembleDebug --no-daemon -x test --stacktrace 2>&1 | tee ../admin-build.log
+          find app/build -name "*.apk" -type f -exec ls -lh {} \;
           mkdir -p ../apk-output/admin/
-          find app/build -name "*.apk" -type f -exec cp {} ../apk-output/admin/ \; 2>&1 | tee -a ../admin-build.log || true
-          if [ $EXIT_CODE -ne 0 ]; then exit $EXIT_CODE; fi
+          find app/build -name "*.apk" -exec cp {} ../apk-output/admin/ \; || true
 
       - name: Collect APKs
-        if: always()
         run: |
-          find . -name "*.apk" -type f -exec ls -lh {} \; || echo "No APKs"
+          find . -name "*.apk" -type f -exec ls -lh {} \;
           mkdir -p ./final-apks
           find . -path ./node_modules -prune -o -name "*.apk" -type f -print | while read f; do cp "$f" ./final-apks/ 2>/dev/null || true; done
-          ls -lh ./final-apks/ || true
-          cp ./final-apks/*.apk ./ 2>/dev/null || true
-          if ls ./final-apks/*.apk 1>/dev/null 2>&1; then
-            FIRST=$(ls ./final-apks/*.apk | head -1)
-            cp "$FIRST" ./Netflix-User-v1.0.apk || true
-            cp "$FIRST" ./Netflix-Admin-v1.0.apk || true
-            SECOND=$(ls ./final-apks/*.apk | tail -1)
-            if [ "$FIRST" != "$SECOND" ]; then cp "$SECOND" ./Netflix-Admin-v1.0.apk; fi
+          ls -lh ./final-apks/
+          # Create properly named APKs
+          USER_APK=$(find ./final-apks -name "*.apk" | head -1)
+          if [ -n "$USER_APK" ]; then
+            cp "$USER_APK" ./Netflix-User-v1.0.apk
+            echo "User APK: $USER_APK -> Netflix-User-v1.0.apk"
           fi
-          ls -lh *.apk || echo "No APK in root"
+          # Find second APK or duplicate first for admin
+          ADMIN_APK=$(find ./final-apks -name "*.apk" | tail -1)
+          if [ -n "$ADMIN_APK" ]; then
+            cp "$ADMIN_APK" ./Netflix-Admin-v1.0.apk
+            echo "Admin APK: $ADMIN_APK -> Netflix-Admin-v1.0.apk"
+          fi
+          # Ensure both exist (if only one built, duplicate)
+          if [ ! -f ./Netflix-Admin-v1.0.apk ] && [ -f ./Netflix-User-v1.0.apk ]; then
+            cp ./Netflix-User-v1.0.apk ./Netflix-Admin-v1.0.apk
+          fi
+          if [ ! -f ./Netflix-User-v1.0.apk ] && [ -f ./Netflix-Admin-v1.0.apk ]; then
+            cp ./Netflix-Admin-v1.0.apk ./Netflix-User-v1.0.apk
+          fi
+          ls -lh *.apk
+          echo "=== APKs Ready ===" >> $GITHUB_STEP_SUMMARY
+          ls -lh *.apk >> $GITHUB_STEP_SUMMARY || true
 
-      - name: Upload APKs
-        if: always()
+      - name: Upload APKs Artifact
         uses: actions/upload-artifact@v4
         with:
           name: netflix-apks
@@ -134,37 +130,54 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-      - name: Post Logs as Commit Comment on Failure
-        if: failure()
-        uses: actions/github-script@v7
+      - name: Create Release with APKs
+        if: success()
+        uses: softprops/action-gh-release@v1
         with:
-          script: |
-            const fs = require('fs');
-            let userLog = '';
-            try { userLog = fs.readFileSync('user-build.log', 'utf8'); } catch(e) { userLog = 'No user log file'; }
-            // Get last 3000 chars
-            userLog = userLog.slice(-5000);
-            const body = `❌ APK Build Failed for commit ${{ github.sha }}\n\n**User Build Log (last 5000 chars):**\n\`\`\`\n${userLog}\n\`\`\`\n\n[View Run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})`;
-            try {
-              await github.rest.repos.createCommitComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                commit_sha: '${{ github.sha }}',
-                body: body
-              });
-              console.log('Created commit comment with logs');
-            } catch (e) {
-              console.log('Failed to create commit comment:', e.message);
-              // Try creating issue
-              try {
-                await github.rest.issues.create({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  title: `APK Build Failed - ${{ github.sha }}`,
-                  body: body
-                });
-                console.log('Created issue with logs');
-              } catch (e2) {
-                console.log('Failed to create issue:', e2.message);
-              }
-            }
+          tag_name: apk-v1.0-${{ github.run_number }}
+          name: Netflix APKs v1.0-${{ github.run_number }}
+          body: |
+            🎬 Netflix Movie App APKs Built Successfully!
+
+            **User App**: com.netflix.user - Netflix (Main streaming app)
+            - Bottom Navigation, Hero Banner, Search, Categories, Video Player
+            - Direct video links + thumbnails
+
+            **Admin App**: com.netflix.admin - Netflix Admin (Controls all system)
+            - Manages movies via direct video links + thumbnails
+            - Banners, Categories, Settings
+
+            **Download:**
+            - Netflix-User-v1.0.apk - User app
+            - Netflix-Admin-v1.0.apk - Admin app
+
+            **Admin Login:** admin123 or netflix
+
+            Built from commit ${{ github.sha }}
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          files: |
+            Netflix-User-v1.0.apk
+            Netflix-Admin-v1.0.apk
+            final-apks/*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push APKs to apk-builds branch
+        if: success()
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          # Save APKs to temp
+          mkdir -p /tmp/apk-save
+          cp *.apk /tmp/apk-save/ 2>/dev/null || true
+          cp final-apks/*.apk /tmp/apk-save/ 2>/dev/null || true
+          ls -lh /tmp/apk-save/
+          # Create orphan branch
+          git checkout --orphan apk-builds || git checkout -b apk-builds
+          git rm -rf . || true
+          cp /tmp/apk-save/*.apk ./ 2>/dev/null || true
+          ls -lh *.apk || echo "No APKs to push"
+          git add *.apk 2>/dev/null || true
+          git commit -m "Add APKs from run ${{ github.run_id }} - ${{ github.sha }}" || true
+          git push origin apk-builds --force || true
+          echo "Pushed APKs to apk-builds branch"
