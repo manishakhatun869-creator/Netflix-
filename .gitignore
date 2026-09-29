@@ -39,6 +39,8 @@ android-admin/app/src/main/assets/capacitor.config.json
 android-user/app/src/main/assets/capacitor.plugins.json
 android-admin/app/src/main/assets/capacitor.plugins.json
 
-# APKs
+# APKs (ignore all except apks folder)
 *.apk
 *.aab
+!apks/*.apk
+!apks/*.aab
