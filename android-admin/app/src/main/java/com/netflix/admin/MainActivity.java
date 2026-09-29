@@ -1,5 +1,43 @@
 package com.netflix.admin;
 
-import com.getcapacitor.BridgeActivity;
+import android.os.Bundle;
+import android.webkit.WebSettings;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
+import androidx.appcompat.app.AppCompatActivity;
 
-public class MainActivity extends BridgeActivity {}
+public class MainActivity extends AppCompatActivity {
+    private WebView webView;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        
+        webView = new WebView(this);
+        setContentView(webView);
+        
+        WebSettings settings = webView.getSettings();
+        settings.setJavaScriptEnabled(true);
+        settings.setDomStorageEnabled(true);
+        settings.setAllowFileAccess(true);
+        settings.setAllowContentAccess(true);
+        settings.setAllowFileAccessFromFileURLs(true);
+        settings.setAllowUniversalAccessFromFileURLs(true);
+        settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+        settings.setJavaScriptCanOpenWindowsAutomatically(true);
+        settings.setMediaPlaybackRequiresUserGesture(false);
+        
+        webView.setWebViewClient(new WebViewClient());
+        // Admin build has IS_ADMIN_APK flag injected in index.html
+        webView.loadUrl("file:///android_asset/public/index.html");
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (webView.canGoBack()) {
+            webView.goBack();
+        } else {
+            super.onBackPressed();
+        }
+    }
+}
