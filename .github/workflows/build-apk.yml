@@ -53,70 +53,49 @@ jobs:
       - name: Prepare Android Assets (copy dist to android projects)
         run: node scripts/prepare-android.js
 
-      - name: Verify builds
-        run: |
-          ls -lh dist/ | head -20
-          ls -lh dist-admin/ | head -20
-          ls -lh android-user/app/src/main/assets/public/ | head -10
-          ls -lh android-admin/app/src/main/assets/public/ | head -10
-
-      # --- Build User APK ---
       - name: Build User APK (Debug)
         run: |
           cd android-user
           chmod +x gradlew
-          ./gradlew --version
           ./gradlew assembleDebug --no-daemon -x test --stacktrace 2>&1 | tee ../user-build.log
-          echo "=== User APK built ==="
-          find app/build -name "*.apk" -type f | xargs ls -lh || true
-          ls -lh app/build/outputs/apk/debug/ || true
-          cp app/build/outputs/apk/debug/app-debug.apk ../Netflix-User.apk || cp $(find app/build -name "*.apk" | head -1) ../Netflix-User.apk || true
+          echo "=== User APK search ==="
+          find . -name "*.apk" -type f | xargs ls -lh || echo "No APK found in android-user"
+          find . -name "*.apk" -type f -exec cp {} ../Netflix-User-debug.apk \; || true
+          ls -lh ../*.apk || true
 
-      - name: Upload User Build Log (on failure)
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: user-build-log
-          path: user-build.log
-          retention-days: 7
-
-      # --- Build Admin APK ---
       - name: Build Admin APK (Debug)
         run: |
           cd android-admin
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon -x test --stacktrace 2>&1 | tee ../admin-build.log
-          echo "=== Admin APK built ==="
-          find app/build -name "*.apk" -type f | xargs ls -lh || true
-          ls -lh app/build/outputs/apk/debug/ || true
-          cp app/build/outputs/apk/debug/app-debug.apk ../Netflix-Admin.apk || cp $(find app/build -name "*.apk" | head -1) ../Netflix-Admin.apk || true
+          echo "=== Admin APK search ==="
+          find . -name "*.apk" -type f | xargs ls -lh || echo "No APK found in android-admin"
+          find . -name "*.apk" -type f -exec cp {} ../Netflix-Admin-debug.apk \; || true
+          ls -lh ../*.apk || true
 
-      - name: Upload Admin Build Log (on failure)
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: admin-build-log
-          path: admin-build.log
-          retention-days: 7
-
-      - name: List APKs
+      - name: Collect APKs to Root
         run: |
-          echo "=== Root ==="
-          ls -lh *.apk || true
-          echo "=== User ==="
-          find android-user -name "*.apk" -type f | xargs ls -lh || true
-          echo "=== Admin ==="
-          find android-admin -name "*.apk" -type f | xargs ls -lh || true
+          echo "=== Searching all APKs ==="
+          find . -name "*.apk" -type f | xargs ls -lh || echo "No APKs found anywhere"
+          # Copy any found APKs to root with proper names
+          find android-user -name "*.apk" -type f -exec cp {} ./user.apk \; 2>/dev/null || true
+          find android-admin -name "*.apk" -type f -exec cp {} ./admin.apk \; 2>/dev/null || true
+          cp Netflix-User-debug.apk ./Netflix-User-v1.0.apk 2>/dev/null || cp user.apk ./Netflix-User-v1.0.apk 2>/dev/null || true
+          cp Netflix-Admin-debug.apk ./Netflix-Admin-v1.0.apk 2>/dev/null || cp admin.apk ./Netflix-Admin-v1.0.apk 2>/dev/null || true
+          # Also try to find in gradle cache or other locations
+          find . -maxdepth 4 -name "*.apk" -type f | head -20
+          ls -lh *.apk 2>/dev/null || echo "No APK in root"
+          ls -lh ./Netflix-*.apk 2>/dev/null || true
 
-      # --- Upload Artifacts ---
       - name: Upload User APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: netflix-user-apk
           path: |
-            android-user/app/build/outputs/apk/debug/*.apk
-            android-user/app/build/outputs/apk/**/*.apk
-            Netflix-User.apk
+            **/user.apk
+            **/Netflix-User*.apk
+            Netflix-User*.apk
+            user.apk
           if-no-files-found: warn
           retention-days: 30
 
@@ -125,49 +104,40 @@ jobs:
         with:
           name: netflix-admin-apk
           path: |
-            android-admin/app/build/outputs/apk/debug/*.apk
-            android-admin/app/build/outputs/apk/**/*.apk
-            Netflix-Admin.apk
+            **/admin.apk
+            **/Netflix-Admin*.apk
+            Netflix-Admin*.apk
+            admin.apk
           if-no-files-found: warn
           retention-days: 30
 
-      - name: Upload Both APKs Together
+      - name: Upload All APKs Found
         uses: actions/upload-artifact@v4
         with:
-          name: netflix-both-apks
+          name: netflix-all-apks
           path: |
-            android-user/app/build/outputs/apk/debug/*.apk
-            android-admin/app/build/outputs/apk/debug/*.apk
-            Netflix-User.apk
-            Netflix-Admin.apk
+            **/*.apk
+            *.apk
           if-no-files-found: warn
           retention-days: 30
 
-      - name: Rename APKs for Release
-        run: |
-          find android-user -name "*.apk" -type f -exec cp {} ./Netflix-User-v1.0.apk \; | head -1 || true
-          find android-admin -name "*.apk" -type f -exec cp {} ./Netflix-Admin-v1.0.apk \; | head -1 || true
-          cp android-user/app/build/outputs/apk/debug/app-debug.apk ./Netflix-User-v1.0.apk 2>/dev/null || true
-          cp android-admin/app/build/outputs/apk/debug/app-debug.apk ./Netflix-Admin-v1.0.apk 2>/dev/null || true
-          ls -lh *.apk || true
-
-      - name: Upload Renamed APKs
+      - name: Upload Build Logs
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: netflix-apks-renamed
+          name: build-logs
           path: |
-            Netflix-User-v1.0.apk
-            Netflix-Admin-v1.0.apk
-          retention-days: 90
+            user-build.log
+            admin-build.log
           if-no-files-found: warn
+          retention-days: 7
 
       - name: Build Summary
+        if: always()
         run: |
-          echo "## 🎬 Netflix APKs Built Successfully!" >> $GITHUB_STEP_SUMMARY
+          echo "## 🎬 Netflix APK Build Attempt" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 📱 APK Details" >> $GITHUB_STEP_SUMMARY
-          echo "- **User App**: com.netflix.user - Netflix" >> $GITHUB_STEP_SUMMARY
-          echo "- **Admin App**: com.netflix.admin - Netflix Admin" >> $GITHUB_STEP_SUMMARY
+          echo "### 📱 APK Search Results" >> $GITHUB_STEP_SUMMARY
+          find . -name "*.apk" -type f | head -20 >> $GITHUB_STEP_SUMMARY || echo "No APKs found" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 📦 Artifacts" >> $GITHUB_STEP_SUMMARY
-          echo "- netflix-user-apk, netflix-admin-apk, netflix-both-apks, netflix-apks-renamed" >> $GITHUB_STEP_SUMMARY
+          ls -lh *.apk 2>/dev/null >> $GITHUB_STEP_SUMMARY || echo "No APK in root" >> $GITHUB_STEP_SUMMARY
