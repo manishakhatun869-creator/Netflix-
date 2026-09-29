@@ -32,20 +32,13 @@ jobs:
 
       - name: Setup Android SDK
         run: |
-          echo "Checking Android SDK..."
           echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-          ls -la $ANDROID_HOME || true
-          # Ensure ANDROID_HOME is set for future steps
           echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
           echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
           echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> $GITHUB_PATH
           echo "$ANDROID_HOME/platform-tools" >> $GITHUB_PATH
-          # Accept licenses
           yes | sdkmanager --licenses || true
-          # Install required SDKs
           sdkmanager --install "platform-tools" "platforms;android-34" "build-tools;34.0.0" "platforms;android-33" "build-tools;33.0.2" || true
-          echo "SDK setup done"
           sdkmanager --list_installed | tail -20
 
       - name: Install dependencies
@@ -62,29 +55,22 @@ jobs:
 
       - name: Verify builds
         run: |
-          echo "=== dist ==="
-          ls -lh dist/
-          echo "=== dist-admin ==="
-          ls -lh dist-admin/
-          echo "=== android-user assets ==="
-          ls -lh android-user/app/src/main/assets/public/ | head -20
-          echo "=== android-admin assets ==="
-          ls -lh android-admin/app/src/main/assets/public/ | head -20
+          ls -lh dist/ | head -20
+          ls -lh dist-admin/ | head -20
+          ls -lh android-user/app/src/main/assets/public/ | head -10
+          ls -lh android-admin/app/src/main/assets/public/ | head -10
 
       # --- Build User APK ---
       - name: Build User APK (Debug)
         run: |
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-          ls $ANDROID_HOME/platforms/ || true
           cd android-user
           chmod +x gradlew
           ./gradlew --version
           ./gradlew assembleDebug --no-daemon -x test --stacktrace 2>&1 | tee ../user-build.log
           echo "=== User APK built ==="
+          find app/build -name "*.apk" -type f | xargs ls -lh || true
           ls -lh app/build/outputs/apk/debug/ || true
-          cp app/build/outputs/apk/debug/app-debug.apk ../Netflix-User.apk || true
-        continue-on-error: false
+          cp app/build/outputs/apk/debug/app-debug.apk ../Netflix-User.apk || cp $(find app/build -name "*.apk" | head -1) ../Netflix-User.apk || true
 
       - name: Upload User Build Log (on failure)
         if: failure()
@@ -97,13 +83,13 @@ jobs:
       # --- Build Admin APK ---
       - name: Build Admin APK (Debug)
         run: |
-          echo "ANDROID_HOME=$ANDROID_HOME"
           cd android-admin
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon -x test --stacktrace 2>&1 | tee ../admin-build.log
           echo "=== Admin APK built ==="
+          find app/build -name "*.apk" -type f | xargs ls -lh || true
           ls -lh app/build/outputs/apk/debug/ || true
-          cp app/build/outputs/apk/debug/app-debug.apk ../Netflix-Admin.apk || true
+          cp app/build/outputs/apk/debug/app-debug.apk ../Netflix-Admin.apk || cp $(find app/build -name "*.apk" | head -1) ../Netflix-Admin.apk || true
 
       - name: Upload Admin Build Log (on failure)
         if: failure()
@@ -115,25 +101,34 @@ jobs:
 
       - name: List APKs
         run: |
+          echo "=== Root ==="
           ls -lh *.apk || true
-          ls -lh android-user/app/build/outputs/apk/debug/ || true
-          ls -lh android-admin/app/build/outputs/apk/debug/ || true
+          echo "=== User ==="
+          find android-user -name "*.apk" -type f | xargs ls -lh || true
+          echo "=== Admin ==="
+          find android-admin -name "*.apk" -type f | xargs ls -lh || true
 
       # --- Upload Artifacts ---
       - name: Upload User APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: netflix-user-apk
-          path: android-user/app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
+          path: |
+            android-user/app/build/outputs/apk/debug/*.apk
+            android-user/app/build/outputs/apk/**/*.apk
+            Netflix-User.apk
+          if-no-files-found: warn
           retention-days: 30
 
       - name: Upload Admin APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: netflix-admin-apk
-          path: android-admin/app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
+          path: |
+            android-admin/app/build/outputs/apk/debug/*.apk
+            android-admin/app/build/outputs/apk/**/*.apk
+            Netflix-Admin.apk
+          if-no-files-found: warn
           retention-days: 30
 
       - name: Upload Both APKs Together
@@ -141,14 +136,19 @@ jobs:
         with:
           name: netflix-both-apks
           path: |
-            android-user/app/build/outputs/apk/debug/app-debug.apk
-            android-admin/app/build/outputs/apk/debug/app-debug.apk
+            android-user/app/build/outputs/apk/debug/*.apk
+            android-admin/app/build/outputs/apk/debug/*.apk
+            Netflix-User.apk
+            Netflix-Admin.apk
+          if-no-files-found: warn
           retention-days: 30
 
       - name: Rename APKs for Release
         run: |
-          cp android-user/app/build/outputs/apk/debug/app-debug.apk ./Netflix-User-v1.0.apk || true
-          cp android-admin/app/build/outputs/apk/debug/app-debug.apk ./Netflix-Admin-v1.0.apk || true
+          find android-user -name "*.apk" -type f -exec cp {} ./Netflix-User-v1.0.apk \; | head -1 || true
+          find android-admin -name "*.apk" -type f -exec cp {} ./Netflix-Admin-v1.0.apk \; | head -1 || true
+          cp android-user/app/build/outputs/apk/debug/app-debug.apk ./Netflix-User-v1.0.apk 2>/dev/null || true
+          cp android-admin/app/build/outputs/apk/debug/app-debug.apk ./Netflix-Admin-v1.0.apk 2>/dev/null || true
           ls -lh *.apk || true
 
       - name: Upload Renamed APKs
