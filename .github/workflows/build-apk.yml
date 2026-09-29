@@ -39,6 +39,11 @@ jobs:
           echo "$ANDROID_HOME/platform-tools" >> $GITHUB_PATH
           yes | sdkmanager --licenses || true
           sdkmanager --install "platform-tools" "platforms;android-34" "build-tools;34.0.0" || true
+          # Create local.properties for gradle
+          echo "sdk.dir=$ANDROID_HOME" > android-user/local.properties
+          echo "sdk.dir=$ANDROID_HOME" > android-admin/local.properties
+          cat android-user/local.properties
+          cat android-admin/local.properties
 
       - name: Install dependencies
         run: npm ci
@@ -57,27 +62,44 @@ jobs:
           set -o pipefail
           cd android-user
           chmod +x gradlew
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          cat local.properties
           ./gradlew --version
-          ./gradlew assembleDebug --no-daemon -x test --stacktrace 2>&1 | tee ../user-build.log
-          echo "=== Build outputs ==="
-          ls -R app/build/outputs/ || echo "No outputs"
-          find app/build -name "*.apk" -type f -exec ls -lh {} \;
+          echo "=== Starting Gradle Build User ==="
+          ./gradlew assembleDebug --no-daemon -x test --stacktrace 2>&1 | tee ../user-build.log; EXIT_CODE=${PIPESTATUS[0]}
+          echo "Gradle exit code: $EXIT_CODE" | tee -a ../user-build.log
+          echo "=== Build outputs ===" | tee -a ../user-build.log
+          ls -R app/build/outputs/ 2>&1 | tee -a ../user-build.log || echo "No outputs" | tee -a ../user-build.log
+          find app/build -name "*.apk" -type f -exec ls -lh {} \; 2>&1 | tee -a ../user-build.log || echo "No APK found" | tee -a ../user-build.log
           mkdir -p ../apk-output/user/
-          find app/build -name "*.apk" -type f -exec cp {} ../apk-output/user/ \; || true
-          ls -lh ../apk-output/user/ || true
+          find app/build -name "*.apk" -type f -exec cp {} ../apk-output/user/ \; 2>&1 | tee -a ../user-build.log || true
+          ls -lh ../apk-output/user/ 2>&1 | tee -a ../user-build.log || true
+          # Output to summary for debugging
+          echo "### User Build Log" >> $GITHUB_STEP_SUMMARY
+          tail -200 ../user-build.log >> $GITHUB_STEP_SUMMARY || true
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### User APKs Found" >> $GITHUB_STEP_SUMMARY
+          find app/build -name "*.apk" -type f 2>/dev/null >> $GITHUB_STEP_SUMMARY || echo "No APKs" >> $GITHUB_STEP_SUMMARY
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "Gradle failed with $EXIT_CODE"
+            exit $EXIT_CODE
+          fi
 
       - name: Build Admin APK
         run: |
           set -o pipefail
           cd android-admin
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon -x test --stacktrace 2>&1 | tee ../admin-build.log
-          echo "=== Build outputs ==="
-          ls -R app/build/outputs/ || echo "No outputs"
-          find app/build -name "*.apk" -type f -exec ls -lh {} \;
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          ./gradlew assembleDebug --no-daemon -x test --stacktrace 2>&1 | tee ../admin-build.log; EXIT_CODE=${PIPESTATUS[0]}
+          echo "Gradle exit code: $EXIT_CODE" | tee -a ../admin-build.log
+          ls -R app/build/outputs/ 2>&1 | tee -a ../admin-build.log || true
+          find app/build -name "*.apk" -type f -exec ls -lh {} \; 2>&1 | tee -a ../admin-build.log || true
           mkdir -p ../apk-output/admin/
-          find app/build -name "*.apk" -type f -exec cp {} ../apk-output/admin/ \; || true
-          ls -lh ../apk-output/admin/ || true
+          find app/build -name "*.apk" -type f -exec cp {} ../apk-output/admin/ \; 2>&1 | tee -a ../admin-build.log || true
+          echo "### Admin Build Log" >> $GITHUB_STEP_SUMMARY
+          tail -200 ../admin-build.log >> $GITHUB_STEP_SUMMARY || true
+          if [ $EXIT_CODE -ne 0 ]; then exit $EXIT_CODE; fi
 
       - name: Collect APKs
         if: always()
@@ -88,20 +110,18 @@ jobs:
           find . -path ./node_modules -prune -o -name "*.apk" -type f -print | while read f; do cp "$f" ./final-apks/ 2>/dev/null || true; done
           ls -lh ./final-apks/ || true
           cp ./final-apks/*.apk ./ 2>/dev/null || true
-          # Create renamed versions
           if ls ./final-apks/*.apk 1>/dev/null 2>&1; then
             FIRST=$(ls ./final-apks/*.apk | head -1)
             cp "$FIRST" ./Netflix-User-v1.0.apk || true
             cp "$FIRST" ./Netflix-Admin-v1.0.apk || true
-            # If more than one, use second for admin
             SECOND=$(ls ./final-apks/*.apk | tail -1)
             if [ "$FIRST" != "$SECOND" ]; then cp "$SECOND" ./Netflix-Admin-v1.0.apk; fi
           fi
           ls -lh *.apk || echo "No APK in root"
-          echo "=== Final APKs ===" >> $GITHUB_STEP_SUMMARY
+          echo "=== Final APKs in Summary ===" >> $GITHUB_STEP_SUMMARY
           find . -name "*.apk" -type f | head -20 >> $GITHUB_STEP_SUMMARY || echo "No APKs" >> $GITHUB_STEP_SUMMARY
 
-      - name: Upload APKs (All Found)
+      - name: Upload APKs
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -115,30 +135,13 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
-      - name: Upload Build Outputs (Debug)
+      - name: Upload Logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: build-outputs
+          name: build-logs
           path: |
-            apk-output/
-            final-apks/
             user-build.log
             admin-build.log
           if-no-files-found: warn
           retention-days: 7
-
-      - name: Summary
-        if: always()
-        run: |
-          echo "## Build Results" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          find . -name "*.apk" -type f 2>/dev/null | head -20 >> $GITHUB_STEP_SUMMARY || echo "No APKs found" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          ls -lh *.apk 2>/dev/null >> $GITHUB_STEP_SUMMARY || echo "No APK in root" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### User Log Tail" >> $GITHUB_STEP_SUMMARY
-          tail -100 user-build.log 2>/dev/null >> $GITHUB_STEP_SUMMARY || echo "No user log" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Admin Log Tail" >> $GITHUB_STEP_SUMMARY
-          tail -100 admin-build.log 2>/dev/null >> $GITHUB_STEP_SUMMARY || echo "No admin log" >> $GITHUB_STEP_SUMMARY
