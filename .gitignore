@@ -29,8 +29,6 @@ android-user/app/build/
 android-admin/app/build/
 android-user/.gradle/
 android-admin/.gradle/
-android-user/capacitor-cordova-android-plugins/
-android-admin/capacitor-cordova-android-plugins/
 **/local.properties
 
 # Capacitor web assets (generated)
