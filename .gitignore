@@ -1,0 +1,46 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-admin
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Android
+android-user/app/build/
+android-admin/app/build/
+android-user/.gradle/
+android-admin/.gradle/
+android-user/capacitor-cordova-android-plugins/
+android-admin/capacitor-cordova-android-plugins/
+**/local.properties
+
+# Capacitor web assets (generated)
+android-user/app/src/main/assets/public/
+android-admin/app/src/main/assets/public/
+android-user/app/src/main/assets/capacitor.config.json
+android-admin/app/src/main/assets/capacitor.config.json
+android-user/app/src/main/assets/capacitor.plugins.json
+android-admin/app/src/main/assets/capacitor.plugins.json
+
+# APKs
+*.apk
+*.aab

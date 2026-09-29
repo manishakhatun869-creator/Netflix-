@@ -1,0 +1,9 @@
+{
+  "appId": "com.netflix.user",
+  "appName": "Netflix",
+  "webDir": "dist",
+  "bundledWebRuntime": false,
+  "server": {
+    "androidScheme": "https"
+  }
+}

@@ -1,0 +1,150 @@
+name: Build Netflix APKs (User + Admin)
+
+on:
+  push:
+    branches: [ main, arena/* ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-apks:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Web App (User)
+        run: npm run build
+
+      - name: Prepare Admin Build (inject admin flag)
+        run: node scripts/prepare-admin.js
+
+      - name: Prepare Android Assets (copy dist to android projects)
+        run: node scripts/prepare-android.js
+
+      - name: Verify builds
+        run: |
+          echo "=== dist ==="
+          ls -lh dist/
+          echo "=== dist-admin ==="
+          ls -lh dist-admin/
+          echo "=== android-user assets ==="
+          ls -lh android-user/app/src/main/assets/public/ | head -20
+          echo "=== android-admin assets ==="
+          ls -lh android-admin/app/src/main/assets/public/ | head -20
+          echo "=== Check admin flag ==="
+          grep -c "IS_ADMIN_APK" dist-admin/index.html || echo "not found in dist-admin"
+          grep -c "IS_ADMIN_APK" android-admin/app/src/main/assets/public/index.html || echo "not found in android-admin assets"
+
+      # --- Build User APK ---
+      - name: Build User APK (Debug)
+        run: |
+          cd android-user
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon -x test --stacktrace
+          echo "=== User APK built ==="
+          ls -lh app/build/outputs/apk/debug/
+          cp app/build/outputs/apk/debug/app-debug.apk ../Netflix-User.apk
+
+      # --- Build Admin APK ---
+      - name: Build Admin APK (Debug)
+        run: |
+          cd android-admin
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon -x test --stacktrace
+          echo "=== Admin APK built ==="
+          ls -lh app/build/outputs/apk/debug/
+          cp app/build/outputs/apk/debug/app-debug.apk ../Netflix-Admin.apk
+
+      - name: List APKs
+        run: |
+          ls -lh *.apk
+          ls -lh android-user/app/build/outputs/apk/debug/
+          ls -lh android-admin/app/build/outputs/apk/debug/
+
+      # --- Upload Artifacts ---
+      - name: Upload User APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: netflix-user-apk
+          path: android-user/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload Admin APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: netflix-admin-apk
+          path: android-admin/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload Both APKs Together
+        uses: actions/upload-artifact@v4
+        with:
+          name: netflix-both-apks
+          path: |
+            android-user/app/build/outputs/apk/debug/app-debug.apk
+            android-admin/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 30
+
+      - name: Rename APKs for Release
+        run: |
+          cp android-user/app/build/outputs/apk/debug/app-debug.apk ./Netflix-User-v1.0.apk
+          cp android-admin/app/build/outputs/apk/debug/app-debug.apk ./Netflix-Admin-v1.0.apk
+          ls -lh *.apk
+
+      - name: Upload Renamed APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: netflix-apks-renamed
+          path: |
+            Netflix-User-v1.0.apk
+            Netflix-Admin-v1.0.apk
+          retention-days: 90
+
+      - name: Build Summary
+        run: |
+          echo "## 🎬 Netflix APKs Built Successfully!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📱 APK Details" >> $GITHUB_STEP_SUMMARY
+          echo "- **User App**: com.netflix.user - Netflix (Main streaming app with bottom nav, banners, search, categories, video player)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Admin App**: com.netflix.admin - Netflix Admin (Controls all system - movies, banners, categories via direct video links)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📦 Artifacts" >> $GITHUB_STEP_SUMMARY
+          echo "- netflix-user-apk - User APK (install on Android)" >> $GITHUB_STEP_SUMMARY
+          echo "- netflix-admin-apk - Admin APK (install on Android)" >> $GITHUB_STEP_SUMMARY
+          echo "- netflix-both-apks - Both APKs together" >> $GITHUB_STEP_SUMMARY
+          echo "- netflix-apks-renamed - Renamed APKs (Netflix-User-v1.0.apk, Netflix-Admin-v1.0.apk)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔧 Features" >> $GITHUB_STEP_SUMMARY
+          echo "- Bottom Navigation, Banner Carousel, Search, Categories" >> $GITHUB_STEP_SUMMARY
+          echo "- Video Direct Links + Thumbnails support" >> $GITHUB_STEP_SUMMARY
+          echo "- Admin controls all app system" >> $GITHUB_STEP_SUMMARY
+          echo "- Built with Capacitor + React + Vite" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📥 Download" >> $GITHUB_STEP_SUMMARY
+          echo "Go to Actions -> This workflow run -> Artifacts to download APKs" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔐 Admin Login" >> $GITHUB_STEP_SUMMARY
+          echo "Password: admin123 or netflix" >> $GITHUB_STEP_SUMMARY

@@ -1,0 +1,12 @@
+{
+  "appId": "com.netflix.admin",
+  "appName": "Netflix Admin",
+  "webDir": "dist-admin",
+  "bundledWebRuntime": false,
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "path": "android-admin"
+  }
+}
